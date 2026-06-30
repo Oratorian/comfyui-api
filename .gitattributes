@@ -1,0 +1,13 @@
+# Normalize line endings. Text files are LF in the repo; Git checks them out
+# with native endings on Windows but stores LF, keeping diffs clean.
+* text=auto eol=lf
+
+# Windows-native scripts keep CRLF on checkout.
+*.ps1 text eol=crlf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Treat JSON workflows and YAML as text (LF).
+*.json text eol=lf
+*.yml  text eol=lf
+*.yaml text eol=lf
