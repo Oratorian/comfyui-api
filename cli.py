@@ -70,15 +70,14 @@ def main(argv=None):
     pre_args, _ = pre.parse_known_args(argv)
 
     workflow_dir = resolve_workflow_dir(HERE, pre_args.workflow_dir)
-    # A bad --workflow-dir is a hard error (typo-catching). When NOT explicitly
-    # given, an empty default dir is tolerated — you can still pass --workflow
-    # as an explicit path.
-    if pre_args.workflow_dir is not None or pre_args.list_workflows:
-        err = validate_workflow_dir(workflow_dir)
-        if err:
-            sys.exit(f"error: {err}")
 
+    # --list-workflows always succeeds for an existing directory: it just shows
+    # what's there (including nothing). A genuinely bad path (typo) still errors,
+    # but an empty-yet-valid dir prints "(none)" rather than failing — this is the
+    # first command a user runs on a fresh download, where workflows/ is empty.
     if pre_args.list_workflows:
+        if not os.path.isdir(workflow_dir):
+            sys.exit(f"error: workflow dir '{workflow_dir}' does not exist")
         files = _list_workflows(workflow_dir)
         print(f"workflow dir: {workflow_dir}")
         if files:
@@ -87,6 +86,15 @@ def main(argv=None):
         else:
             print("  (none)")
         return
+
+    # For a real run, an explicitly-given --workflow-dir must be usable (exist
+    # AND contain at least one .json). When NOT explicitly given, an empty
+    # default dir is tolerated — you can still pass --workflow as an explicit
+    # path.
+    if pre_args.workflow_dir is not None:
+        err = validate_workflow_dir(workflow_dir)
+        if err:
+            sys.exit(f"error: {err}")
 
     p = argparse.ArgumentParser(
         description="Generate image(s) via a running ComfyUI instance (no server).",
