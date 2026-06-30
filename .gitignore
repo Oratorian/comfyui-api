@@ -1,0 +1,40 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+
+# --- Virtual environments ---
+.venv/
+venv/
+env/
+
+# --- Nuitka / build output ---
+/dist/
+/build/
+*.build/
+*.dist/
+*.onefile-build/
+*.bin
+*.exe
+
+# --- Runtime data created by the app ---
+/input/
+# Workflows are environment-specific (they reference your installed ComfyUI
+# models). The two sample workflows ARE tracked; ignore everything else you
+# drop in here locally.
+/workflows/*
+!/workflows/anima.json
+!/workflows/illustrious.json
+
+# --- Editor / OS / tooling ---
+.claude/
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# --- Local-only artifacts (not for the repo) ---
+discord-post.txt
+comfyui-api.zip

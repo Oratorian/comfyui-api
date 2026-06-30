@@ -1,0 +1,122 @@
+name: Build binaries (Nuitka)
+
+# Build standalone one-file Windows binaries for cli.py and server.py with
+# Nuitka. windows-latest already ships MSVC, which Nuitka auto-detects — the same
+# toolchain used to build locally. Mirrors build_nuitka.ps1.
+on:
+  push:
+    tags:
+      - "v*"          # build + publish a Release on version tags (e.g. v1.0.0)
+  workflow_dispatch:  # allow manual runs from the Actions tab
+
+permissions:
+  contents: write     # needed to create / upload a GitHub Release
+
+jobs:
+  build:
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: cli
+            script: cli.py
+            product: ComfyUI API CLI
+            # CLI is lean: api/utils + Pillow + requests_toolbelt + websocket-client.
+            packages: |
+              api
+              utils
+              PIL
+              requests_toolbelt
+              websocket
+          - name: server
+            script: server.py
+            product: ComfyUI API Server
+            # Server needs the full ASGI/uvicorn stack; much of it is imported by
+            # string at runtime and would be missed by static analysis.
+            packages: |
+              api
+              utils
+              uvicorn
+              fastapi
+              starlette
+              anyio
+              h11
+              websockets
+              httptools
+              watchfiles
+              multipart
+
+    name: build-${{ matrix.name }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # Workflows are intentionally NOT bundled (--include-data-dir is omitted):
+      # they reference the model/checkpoint names installed in a specific ComfyUI,
+      # so they ship as a folder next to the exe instead (staged below).
+      - name: Build ${{ matrix.name }} (Nuitka)
+        uses: Nuitka/Nuitka-Action@main
+        with:
+          nuitka-version: main
+          script-name: ${{ matrix.script }}
+          mode: onefile
+          output-dir: build
+          company-name: comfyui-api
+          product-name: ${{ matrix.product }}
+          product-version: 1.0.0
+          include-package: ${{ matrix.packages }}
+
+      - name: Stage exe + sample workflows
+        shell: pwsh
+        run: |
+          $out = "dist-${{ matrix.name }}"
+          New-Item -ItemType Directory -Force $out | Out-Null
+          # Nuitka onefile output lands at build\<script-stem>.exe
+          $exe = Get-ChildItem build -Filter *.exe -Recurse | Select-Object -First 1
+          if (-not $exe) { throw "no .exe produced under build\" }
+          Copy-Item $exe.FullName (Join-Path $out "${{ matrix.name }}.exe")
+          # Ship the sample workflows beside the exe (overridable by the user).
+          Copy-Item workflows (Join-Path $out "workflows") -Recurse
+          Get-ChildItem $out -Recurse | Select-Object FullName, Length
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: comfyui-api-${{ matrix.name }}-windows
+          path: dist-${{ matrix.name }}/**
+          if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    steps:
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Zip each target
+        run: |
+          cd artifacts
+          for d in */; do
+            name="${d%/}"
+            (cd "$d" && zip -r "../${name}.zip" .)
+          done
+          ls -la artifacts*.zip ./*.zip 2>/dev/null || ls -la
+
+      - name: Publish Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*.zip
+          generate_release_notes: true
