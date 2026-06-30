@@ -14,14 +14,13 @@ Each tagged release ships standalone one-file executables, compiled with
 - **`server.exe`** — the FastAPI server
 
 Download the zip for the target you want from the
-[Releases](../../releases) page and unzip it. Each contains the `.exe` plus a
-`workflows/` folder beside it:
+[Releases](../../releases) page and unzip it. Each contains the `.exe` plus an
+(empty) `workflows/` folder beside it — drop your own Export(API) workflow JSONs
+in there:
 
 ```text
 cli.exe
-workflows/
-  anima.json
-  illustrious.json
+workflows/      <- put your *.json workflows here
 ```
 
 Run it directly — no Python needed:

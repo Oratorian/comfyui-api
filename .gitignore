@@ -20,12 +20,10 @@ env/
 
 # --- Runtime data created by the app ---
 /input/
-# Workflows are environment-specific (they reference your installed ComfyUI
-# models). The two sample workflows ARE tracked; ignore everything else you
-# drop in here locally.
+# Workflows are environment-specific (they reference YOUR installed ComfyUI
+# models), so they are not committed. Keep the folder, ignore its contents.
 /workflows/*
-!/workflows/anima.json
-!/workflows/illustrious.json
+!/workflows/.gitkeep
 
 # --- Editor / OS / tooling ---
 .claude/

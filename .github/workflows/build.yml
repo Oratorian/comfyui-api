@@ -76,7 +76,7 @@ jobs:
           product-version: 1.0.0
           include-package: ${{ matrix.packages }}
 
-      - name: Stage exe + sample workflows
+      - name: Stage exe + workflows folder
         shell: pwsh
         run: |
           $out = "dist-${{ matrix.name }}"
@@ -85,8 +85,14 @@ jobs:
           $exe = Get-ChildItem build -Filter *.exe -Recurse | Select-Object -First 1
           if (-not $exe) { throw "no .exe produced under build\" }
           Copy-Item $exe.FullName (Join-Path $out "${{ matrix.name }}.exe")
-          # Ship the sample workflows beside the exe (overridable by the user).
-          Copy-Item workflows (Join-Path $out "workflows") -Recurse
+          # Ship an (empty) workflows\ folder beside the exe — workflows are
+          # environment-specific and NOT bundled; the user drops their own here.
+          $wf = Join-Path $out "workflows"
+          New-Item -ItemType Directory -Force $wf | Out-Null
+          @"
+          Put your Export(API)-format ComfyUI workflow .json files in this folder
+          (next to the .exe), or point the CLI at another dir with --workflow-dir.
+          "@ | Set-Content -Encoding utf8 (Join-Path $wf "README.txt")
           Get-ChildItem $out -Recurse | Select-Object FullName, Length
 
       - name: Upload artifact
