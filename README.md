@@ -152,6 +152,32 @@ Notes:
 same generation core as the server, so it gets the same prompt/seed/size
 handling and the `--comfyui-host` override.
 
+The flags are identical whether you run it from source (`python cli.py …`) or as
+the prebuilt binary (`cli.exe …`).
+
+### Parameters
+
+| Flag | Default | Description |
+|---|---|---|
+| `--prompt` | *(required)* | Positive prompt. |
+| `--negative` | `""` | Negative prompt. Ignored if the workflow's negative is a `ConditioningZeroOut` node. |
+| `--workflow` | first `*.json` in the workflow dir | Workflow file: a bare name (looked up in `--workflow-dir`) or an explicit path. Must be **Export (API)** format. |
+| `--workflow-dir` | `workflows/` beside the exe, or `$COMFYUI_WORKFLOW_DIR` | Directory to look up workflow files in. |
+| `--list-workflows` | `false` | Print the workflows in the resolved dir and exit. |
+| `--img2img IMAGE` | `None` | Run image-to-image with this input image (the workflow needs a `LoadImage` node). |
+| `--width` | workflow's own | Override output width (px). |
+| `--height` | workflow's own | Override output height (px). |
+| `--batch` | workflow's own | Override images per run (batch size). |
+| `--out` | `output.png` | Output file. With `--all`, an index is inserted (`out.png` → `out_0.png`, `out_1.png`, …). |
+| `--preview` | `false` | Also collect intermediate preview frames (= API `allow_preview`). Combine with `--index`/`--all` to actually save them. |
+| `--index N` | `-1` | Which image to save, in execution order. `-1` is the last/final image; negative indexing works. Ignored with `--all`. |
+| `--all` | `false` | Save every collected image (with an index suffix) instead of one. |
+| `--comfyui-host` | `$COMFYUI_HOST` or `127.0.0.1:8188` | Target ComfyUI as `ip:port`. |
+| `-h`, `--help` | | Show all flags and exit. |
+
+Workflow directory resolution: `--workflow-dir` → `COMFYUI_WORKFLOW_DIR` env var
+→ `workflows/` next to the script/exe.
+
 ```bash
 # basic
 python cli.py --prompt "a knight in a volcanic caldera, dramatic light" --out knight.png
@@ -162,18 +188,13 @@ python cli.py --prompt "..." --negative "lowres, watermark" \
   --comfyui-host 192.168.1.50:8188 --out shot.png
 
 # image-to-image (workflow needs a LoadImage node)
-python cli.py --workflow illustrious.json --prompt "repaint as winter" \
+python cli.py --workflow my_img2img.json --prompt "repaint as winter" \
   --img2img ./input/base.png --out edit.png
 
 # use a different workflow directory, or just list what's available
 python cli.py --list-workflows --workflow-dir /path/to/workflows
 python cli.py --prompt "..." --workflow-dir /path/to/workflows --workflow my.json
 ```
-
-Workflow directory resolution (CLI): `--workflow-dir` → `COMFYUI_WORKFLOW_DIR`
-env var → `workflows/` next to the script/exe. `--workflow` still accepts a bare
-filename (looked up in that directory) or an explicit path. `--list-workflows`
-prints the workflows in the resolved directory and exits.
 
 Image collection and selection are **independent, mirroring the API**:
 
@@ -184,9 +205,8 @@ Image collection and selection are **independent, mirroring the API**:
 - `--all` — save every collected image with an index suffix (`out_0.png`, …).
 
 So `--preview --index 3` collects previews but saves only image #3, and `--all`
-without `--preview` saves all the real outputs without preview frames. Run
-`python cli.py --help` for all flags. The output path is **wherever you point
-`--out`** — it does not force `output/`.
+without `--preview` saves all the real outputs without preview frames. The output
+path is **wherever you point `--out`** — it does not force `output/`.
 
 ---
 
