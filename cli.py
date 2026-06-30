@@ -27,83 +27,71 @@ import os
 import sys
 
 from api.config import (set_comfyui_host, get_comfyui_host, resolve_workflow_dir,
-                        validate_workflow_dir, WORKFLOW_DIR_ENV)
+                        validate_workflow_dir, is_workflow_file, WORKFLOW_DIR_ENV)
 from api.generate import generate
 from utils.actions.load_workflow import load_workflow
 
 # Directory this script lives in; used as the source-run fallback for workflows/.
 HERE = os.path.dirname(os.path.abspath(__file__))
 
+# Sentinel for the --workflow default: we can't compute the real default until
+# the workflow dir is known, and we must avoid scanning the dir eagerly during
+# parser construction (that can crash --help on an unreadable dir). Resolved in
+# main() after parsing.
+_WF_DEFAULT = object()
+
 
 def _resolve_workflow(name: str, workflow_dir: str) -> str:
-    """Accept a bare filename (looked up in workflow_dir) or an explicit path."""
+    """Resolve a --workflow value to a path.
+
+    A bare filename (no path separator) is looked up in workflow_dir first, so a
+    same-named file in the current directory can't silently shadow it. A value
+    containing a separator (or that isn't found in workflow_dir) is treated as an
+    explicit cwd/relative/absolute path.
+    """
+    has_sep = os.sep in name or (os.altsep and os.altsep in name)
+    if not has_sep:
+        candidate = os.path.join(workflow_dir, name)
+        if os.path.isfile(candidate):
+            return candidate
     if os.path.isfile(name):
         return name
-    candidate = os.path.join(workflow_dir, name)
-    if os.path.isfile(candidate):
-        return candidate
-    sys.exit(f"error: workflow '{name}' not found (looked in cwd and {workflow_dir})")
+    sys.exit(f"error: workflow '{name}' not found "
+             f"(looked in workflow dir {workflow_dir} and as a path from cwd)")
 
 
 def _list_workflows(workflow_dir: str) -> list[str]:
-    return sorted(f for f in os.listdir(workflow_dir) if f.endswith(".json")) \
-        if os.path.isdir(workflow_dir) else []
+    """Sorted *.json (case-insensitive) in workflow_dir; [] if missing/unreadable."""
+    try:
+        return sorted(f for f in os.listdir(workflow_dir) if is_workflow_file(f))
+    except OSError:
+        return []
 
 
-def _default_workflow(workflow_dir: str) -> str:
+def _default_workflow(workflow_dir: str) -> str | None:
+    """First workflow in the dir, or None if there are none (no phantom name)."""
     files = _list_workflows(workflow_dir)
-    return files[0] if files else "base_workflow.json"
+    return files[0] if files else None
 
 
 def main(argv=None):
-    # Stage 1: resolve --workflow-dir first (and handle --list-workflows), so the
-    # full parser's --workflow default scans the correct directory. add_help=False
-    # keeps -h for the real parser below; the known/unknown split lets the rest of
-    # the args flow through untouched.
-    # allow_abbrev=False is essential: otherwise argparse prefix-matches
-    # "--workflow foo" (the full parser's arg) to "--workflow-dir foo" here.
-    pre = argparse.ArgumentParser(add_help=False, allow_abbrev=False)
-    pre.add_argument("--workflow-dir", default=None, dest="workflow_dir",
-                     help="Directory to look up workflow files in.")
-    pre.add_argument("--list-workflows", action="store_true", dest="list_workflows",
-                     help="List available workflows in the workflow dir and exit.")
-    pre_args, _ = pre.parse_known_args(argv)
-
-    workflow_dir = resolve_workflow_dir(HERE, pre_args.workflow_dir)
-
-    # --list-workflows always succeeds for an existing directory: it just shows
-    # what's there (including nothing). A genuinely bad path (typo) still errors,
-    # but an empty-yet-valid dir prints "(none)" rather than failing — this is the
-    # first command a user runs on a fresh download, where workflows/ is empty.
-    if pre_args.list_workflows:
-        if not os.path.isdir(workflow_dir):
-            sys.exit(f"error: workflow dir '{workflow_dir}' does not exist")
-        files = _list_workflows(workflow_dir)
-        print(f"workflow dir: {workflow_dir}")
-        if files:
-            for f in files:
-                print(f"  {f}")
-        else:
-            print("  (none)")
-        return
-
-    # For a real run, an explicitly-given --workflow-dir must be usable (exist
-    # AND contain at least one .json). When NOT explicitly given, an empty
-    # default dir is tolerated — you can still pass --workflow as an explicit
-    # path.
-    if pre_args.workflow_dir is not None:
-        err = validate_workflow_dir(workflow_dir)
-        if err:
-            sys.exit(f"error: {err}")
-
+    # Single parser, single grammar. allow_abbrev=False prevents argparse from
+    # prefix-matching "--workflow" onto "--workflow-dir" (and vice versa), so we
+    # don't need a two-stage parse — that earlier design let abbreviations be
+    # honored by one stage but silently dropped by the other.
     p = argparse.ArgumentParser(
         description="Generate image(s) via a running ComfyUI instance (no server).",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+        allow_abbrev=False,
     )
-    p.add_argument("--prompt", required=True, help="Positive prompt.")
+    p.add_argument("--prompt", help="Positive prompt. (required unless --list-workflows)")
     p.add_argument("--negative", default="", help="Negative prompt.")
-    p.add_argument("--workflow", default=_default_workflow(workflow_dir),
-                   help="Workflow file (name in --workflow-dir, or a path). Must be Export(API) format.")
+    # --workflow's real default depends on --workflow-dir and requires scanning
+    # the dir; we must NOT do that during parser construction (it would crash
+    # --help on an unreadable dir), so default to a sentinel and resolve later.
+    p.add_argument("--workflow", default=_WF_DEFAULT,
+                   help="Workflow file (name in --workflow-dir, or a path). "
+                        "Must be Export(API) format. (default: first in the workflow dir)")
     p.add_argument("--workflow-dir", default=None, dest="workflow_dir",
                    help=f"Directory to look up workflow files in "
                         f"(default: workflows/ beside the exe; or ${WORKFLOW_DIR_ENV}).")
@@ -133,6 +121,46 @@ def main(argv=None):
     p.add_argument("--comfyui-host", default=None,
                    help="ComfyUI host as ip:port (default: COMFYUI_HOST env or 127.0.0.1:8188).")
     args = p.parse_args(argv)
+
+    # Resolve the workflow dir from the parsed args (single source of truth):
+    # --workflow-dir flag > $COMFYUI_WORKFLOW_DIR > default. `explicit` is True
+    # when it came from the flag or env (then it must be a usable dir).
+    workflow_dir, explicit = resolve_workflow_dir(HERE, args.workflow_dir)
+
+    # --list-workflows: succeeds for any existing dir (prints "(none)" if empty),
+    # the first command a user runs on a fresh download. A bad path still errors.
+    if args.list_workflows:
+        err = validate_workflow_dir(workflow_dir)
+        # Tolerate "empty" only for the implicit default; an explicit bad/empty
+        # dir is reported. "does not exist"/"not readable" always error.
+        if err and (explicit or "contains no .json" not in err):
+            sys.exit(f"error: {err}")
+        files = _list_workflows(workflow_dir)
+        print(f"workflow dir: {workflow_dir}")
+        for f in files:
+            print(f"  {f}")
+        if not files:
+            print("  (none)")
+        return
+
+    # A real run needs a prompt.
+    if not args.prompt:
+        p.error("the following arguments are required: --prompt")
+
+    # An explicitly-configured workflow dir (flag OR env) must be usable.
+    if explicit:
+        err = validate_workflow_dir(workflow_dir)
+        if err:
+            sys.exit(f"error: {err}")
+
+    # Resolve the --workflow default now that the dir is known.
+    if args.workflow is _WF_DEFAULT:
+        default_wf = _default_workflow(workflow_dir)
+        if default_wf is None:
+            sys.exit(f"error: no workflows found in {workflow_dir} — add a "
+                     f"workflow JSON there, or pass --workflow PATH "
+                     f"(or --workflow-dir).")
+        args.workflow = default_wf
 
     set_comfyui_host(args.comfyui_host)
     print(f"ComfyUI target: {get_comfyui_host()}")

@@ -72,30 +72,47 @@ def resolve_data_dir(name: str, source_dir: str) -> str:
 WORKFLOW_DIR_ENV = "COMFYUI_WORKFLOW_DIR"
 
 
-def resolve_workflow_dir(source_dir: str, cli_value: str | None = None) -> str:
+def is_workflow_file(name: str) -> bool:
+    """A workflow file is any *.json, matched case-insensitively (Windows
+    filesystems are case-insensitive, so 'Anima.JSON' is a valid workflow)."""
+    return name.lower().endswith(".json")
+
+
+def resolve_workflow_dir(source_dir: str, cli_value: str | None = None):
     """Resolve the workflows directory. Precedence:
 
       1. cli_value          (an explicit --workflow-dir, highest priority)
       2. $COMFYUI_WORKFLOW_DIR
       3. resolve_data_dir("workflows", source_dir)   (exe-adjacent / project)
 
-    Returns an absolute path. Does not validate existence — call
-    validate_workflow_dir() for that where an error is wanted.
+    Both the flag and the env var are whitespace-stripped; a blank/whitespace
+    value is treated as unset (falls through to the next source).
+
+    Returns (abs_path, explicit) where `explicit` is True when the dir came from
+    the flag or env var (so the caller can validate it) and False when it is the
+    implicit exe/project default (tolerated when empty). Does not validate —
+    call validate_workflow_dir() where an error is wanted.
     """
-    chosen = cli_value or os.environ.get(WORKFLOW_DIR_ENV) or \
-        resolve_data_dir("workflows", source_dir)
-    return os.path.abspath(os.path.expanduser(chosen))
+    flag = (cli_value or "").strip()
+    env = (os.environ.get(WORKFLOW_DIR_ENV) or "").strip()
+    if flag:
+        chosen, explicit = flag, True
+    elif env:
+        chosen, explicit = env, True
+    else:
+        chosen, explicit = resolve_data_dir("workflows", source_dir), False
+    return os.path.abspath(os.path.expanduser(chosen)), explicit
 
 
 def validate_workflow_dir(path: str) -> str | None:
     """Return an error string if `path` is not a usable workflow dir (missing,
-    not a directory, or contains no *.json), else None."""
+    not a directory, unreadable, or contains no *.json), else None."""
     if not os.path.exists(path):
         return f"workflow dir '{path}' does not exist"
     if not os.path.isdir(path):
         return f"workflow dir '{path}' is not a directory"
     try:
-        has_json = any(f.endswith(".json") for f in os.listdir(path))
+        has_json = any(is_workflow_file(f) for f in os.listdir(path))
     except OSError as e:
         return f"workflow dir '{path}' is not readable: {e}"
     if not has_json:
