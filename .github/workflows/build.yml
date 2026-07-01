@@ -63,6 +63,17 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      # Embed version = the tag without its leading 'v' (v1.2.3 -> 1.2.3); 1.0.0
+      # for manual dispatch. Nuitka's product-version must be up to 4 numbers, so
+      # the 'v' has to be stripped.
+      - name: Resolve version
+        id: ver
+        shell: bash
+        run: |
+          ref="${GITHUB_REF#refs/tags/}"
+          if [[ "$ref" == v* ]]; then echo "value=${ref#v}" >> "$GITHUB_OUTPUT";
+          else echo "value=1.0.0" >> "$GITHUB_OUTPUT"; fi
+
       # Workflows are intentionally NOT bundled (--include-data-dir is omitted):
       # they reference the model/checkpoint names installed in a specific ComfyUI,
       # so they ship as a folder next to the exe instead (staged below).
@@ -75,7 +86,7 @@ jobs:
           output-dir: build
           company-name: comfyui-api
           product-name: ${{ matrix.product }}
-          product-version: 1.0.0
+          product-version: ${{ steps.ver.outputs.value }}
           include-package: ${{ matrix.packages }}
 
       - name: Stage exe + sha256 + workflows folder
