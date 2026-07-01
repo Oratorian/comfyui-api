@@ -31,6 +31,8 @@ from api.config import (set_comfyui_host, get_comfyui_host, resolve_workflow_dir
 from api.generate import generate
 from utils.actions.load_workflow import load_workflow
 
+__version__ = "1.0.2"
+
 # Directory this script lives in; used as the source-run fallback for workflows/.
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -84,6 +86,9 @@ def main(argv=None):
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
         allow_abbrev=False,
     )
+    p.add_argument("--version", action="version",
+                   version=f"comfyui-api cli {__version__}",
+                   help="Show the version and exit.")
     p.add_argument("--prompt", help="Positive prompt. (required unless --list-workflows)")
     p.add_argument("--negative", default="", help="Negative prompt.")
     # --workflow's real default depends on --workflow-dir and requires scanning
