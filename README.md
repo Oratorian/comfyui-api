@@ -38,6 +38,20 @@ the `COMFYUI_WORKFLOW_DIR` env var), and list what's available with
 
 To build them yourself, see [`BUILD.md`](BUILD.md).
 
+### Verifying a download
+
+Each release ships a `.sha256` next to every `.zip`, and the binaries carry a
+[GitHub build-provenance attestation](https://docs.github.com/actions/security-guides/using-artifact-attestations).
+
+```bash
+# checksum (Linux/macOS; on Windows use `Get-FileHash file.zip -Algorithm SHA256`)
+sha256sum -c comfyui-api-cli-windows.zip.sha256
+
+# provenance — proves the binary was built by this repo's release workflow
+gh attestation verify comfyui-api-cli-windows.zip --repo Oratorian/comfyui-api
+gh attestation verify cli.exe --repo Oratorian/comfyui-api   # the exe is attested too
+```
+
 ## Install (from source)
 
 ```bash

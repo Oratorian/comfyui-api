@@ -10,7 +10,9 @@ on:
   workflow_dispatch:  # allow manual runs from the Actions tab
 
 permissions:
-  contents: write     # needed to create / upload a GitHub Release
+  contents: write      # create / upload a GitHub Release
+  id-token: write      # OIDC token for build-provenance attestation
+  attestations: write  # write the provenance attestation to the attestations store
 
 jobs:
   build:
@@ -76,7 +78,7 @@ jobs:
           product-version: 1.0.0
           include-package: ${{ matrix.packages }}
 
-      - name: Stage exe + workflows folder
+      - name: Stage exe + sha256 + workflows folder
         shell: pwsh
         run: |
           $out = "dist-${{ matrix.name }}"
@@ -84,7 +86,12 @@ jobs:
           # Nuitka onefile output lands at build\<script-stem>.exe
           $exe = Get-ChildItem build -Filter *.exe -Recurse | Select-Object -First 1
           if (-not $exe) { throw "no .exe produced under build\" }
-          Copy-Item $exe.FullName (Join-Path $out "${{ matrix.name }}.exe")
+          $exePath = Join-Path $out "${{ matrix.name }}.exe"
+          Copy-Item $exe.FullName $exePath
+          # Publish a SHA-256 checksum next to the exe (inside the zip) so users
+          # can verify the binary. Format: "<hash>  <filename>" (sha256sum style).
+          $hash = (Get-FileHash $exePath -Algorithm SHA256).Hash.ToLower()
+          "$hash  ${{ matrix.name }}.exe" | Set-Content -Encoding ascii -NoNewline "$exePath.sha256"
           # Ship an (empty) workflows\ folder beside the exe — workflows are
           # environment-specific and NOT bundled; the user drops their own here.
           $wf = Join-Path $out "workflows"
@@ -94,6 +101,15 @@ jobs:
           (next to the .exe), or point the CLI at another dir with --workflow-dir.
           "@ | Set-Content -Encoding utf8 (Join-Path $wf "README.txt")
           Get-ChildItem $out -Recurse | Select-Object FullName, Length
+
+      # Cryptographic build provenance (SLSA) for the executable itself. Only on
+      # tag releases — on manual dispatch there is no release to tie it to, and
+      # attestation of throwaway builds just clutters the attestations store.
+      - name: Attest exe provenance
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: dist-${{ matrix.name }}/${{ matrix.name }}.exe
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -112,17 +128,28 @@ jobs:
         with:
           path: artifacts
 
-      - name: Zip each target
+      - name: Zip each target + checksums
         run: |
           cd artifacts
           for d in */; do
             name="${d%/}"
             (cd "$d" && zip -r "../${name}.zip" .)
+            # sha256sum-format checksum next to each zip (verify: sha256sum -c <file>.sha256)
+            sha256sum "${name}.zip" > "${name}.zip.sha256"
           done
-          ls -la artifacts*.zip ./*.zip 2>/dev/null || ls -la
+          ls -la ./*.zip ./*.sha256
+
+      # Attest provenance for the published archives (in addition to the per-exe
+      # attestation from the build jobs).
+      - name: Attest zip provenance
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: artifacts/*.zip
 
       - name: Publish Release
         uses: softprops/action-gh-release@v2
         with:
-          files: artifacts/*.zip
+          files: |
+            artifacts/*.zip
+            artifacts/*.zip.sha256
           generate_release_notes: true
